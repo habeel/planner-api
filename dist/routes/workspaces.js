@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { WorkspaceService } from '../services/workspaceService.js';
 import { UserService } from '../services/userService.js';
+import { OrganizationService } from '../services/organizationService.js';
 const createWorkspaceSchema = z.object({
     name: z.string().min(1).max(255),
+    organization_id: z.string().uuid(),
 });
 const addMemberSchema = z.object({
     email: z.string().email(),
@@ -14,8 +16,33 @@ const updateMemberRoleSchema = z.object({
 export default async function workspaceRoutes(fastify) {
     const workspaceService = new WorkspaceService(fastify);
     const userService = new UserService(fastify);
+    const orgService = new OrganizationService(fastify);
+    // Helper to check org access
+    async function checkOrgAccess(userId, orgId, requiredRoles) {
+        const role = await orgService.getUserRole(orgId, userId);
+        if (!role) {
+            return { allowed: false, role: null };
+        }
+        if (requiredRoles && !requiredRoles.includes(role)) {
+            return { allowed: false, role };
+        }
+        return { allowed: true, role };
+    }
     // GET /api/workspaces
     fastify.get('/', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+        const { organization_id } = request.query;
+        if (organization_id) {
+            // Check user has access to this org
+            const { allowed } = await checkOrgAccess(request.user.id, organization_id);
+            if (!allowed) {
+                return reply.status(403).send({
+                    error: 'You do not have access to this organization',
+                    code: 'FORBIDDEN',
+                });
+            }
+            const workspaces = await workspaceService.getUserWorkspacesInOrg(request.user.id, organization_id);
+            return reply.send({ workspaces });
+        }
         const workspaces = await workspaceService.getUserWorkspaces(request.user.id);
         return reply.send({ workspaces });
     });
@@ -29,7 +56,28 @@ export default async function workspaceRoutes(fastify) {
                 details: parseResult.error.flatten(),
             });
         }
-        const workspace = await workspaceService.create(parseResult.data.name, request.user.id);
+        const { name, organization_id } = parseResult.data;
+        // Check user has access to create workspaces in this org
+        const { allowed, role } = await checkOrgAccess(request.user.id, organization_id, ['OWNER', 'ADMIN']);
+        if (!allowed) {
+            return reply.status(403).send({
+                error: role ? 'Insufficient permissions to create workspaces' : 'You do not have access to this organization',
+                code: 'FORBIDDEN',
+            });
+        }
+        // Check workspace limit
+        const limitCheck = await orgService.checkLimit(organization_id, 'max_workspaces');
+        if (!limitCheck.allowed) {
+            return reply.status(403).send({
+                error: `Workspace limit reached (${limitCheck.current}/${limitCheck.max}). Upgrade your plan to create more workspaces.`,
+                code: 'LIMIT_EXCEEDED',
+            });
+        }
+        const workspace = await workspaceService.create({
+            name,
+            owner_id: request.user.id,
+            organization_id,
+        });
         return reply.status(201).send({ workspace });
     });
     // GET /api/workspaces/:id

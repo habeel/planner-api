@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { envPlugin, corsPlugin, postgresPlugin, authPlugin, emailPlugin, rateLimitPlugin, helmetPlugin } from './plugins/index.js';
+import { envPlugin, corsPlugin, postgresPlugin, authPlugin, emailPlugin, rateLimitPlugin, helmetPlugin, adminAuthPlugin } from './plugins/index.js';
 import {
   authRoutes,
   userRoutes,
@@ -13,6 +13,7 @@ import {
   invitationRoutes,
   billingRoutes,
   stripeWebhookRoutes,
+  adminRoutes,
 } from './routes/index.js';
 
 export async function buildApp() {
@@ -37,6 +38,7 @@ export async function buildApp() {
   await fastify.register(postgresPlugin);
   await fastify.register(authPlugin);
   await fastify.register(emailPlugin);
+  await fastify.register(adminAuthPlugin);
 
   // Register routes with /api prefix
   await fastify.register(authRoutes, { prefix: '/api/auth' });
@@ -51,6 +53,7 @@ export async function buildApp() {
   await fastify.register(planningRoutes, { prefix: '/api/planning' });
   await fastify.register(integrationRoutes, { prefix: '/api/integrations' });
   await fastify.register(reportRoutes, { prefix: '/api/workspaces' });
+  await fastify.register(adminRoutes, { prefix: '/api/admin' });
 
   // Health check endpoint
   fastify.get('/health', async (request, reply) => {

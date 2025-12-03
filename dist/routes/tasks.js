@@ -21,6 +21,7 @@ const updateTaskSchema = z.object({
     due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     status: z.enum(['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'BLOCKED', 'DONE']).optional(),
     priority: z.enum(['LOW', 'MED', 'HIGH', 'CRITICAL']).optional(),
+    position_in_backlog: z.number().int().min(0).nullable().optional(),
 });
 const taskQuerySchema = z.object({
     workspaceId: z.string().uuid(),
@@ -181,6 +182,14 @@ export default async function taskRoutes(fastify) {
             return reply.status(400).send({
                 error: 'Dependent task not found or not in same workspace',
                 code: 'INVALID_DEPENDENCY',
+            });
+        }
+        // Check for circular dependency
+        const wouldCreateCycle = await taskService.hasCircularDependency(id, parseResult.data.depends_on_task_id);
+        if (wouldCreateCycle) {
+            return reply.status(400).send({
+                error: 'Adding this dependency would create a circular reference',
+                code: 'CIRCULAR_DEPENDENCY',
             });
         }
         try {

@@ -80,8 +80,8 @@ export class IntegrationService {
     }
     async searchGitHubIssues(config, credentials, query) {
         try {
-            // Search in the specific repo
-            const searchQuery = `repo:${config.owner}/${config.repo} ${query}`;
+            // Search in the specific repo - search in title and body
+            const searchQuery = `repo:${config.owner}/${config.repo} ${query} in:title,body`;
             const response = await fetch(`https://api.github.com/search/issues?q=${encodeURIComponent(searchQuery)}&per_page=20`, {
                 headers: {
                     Authorization: `Bearer ${credentials.pat}`,
@@ -90,7 +90,21 @@ export class IntegrationService {
                 },
             });
             if (!response.ok) {
-                return [];
+                // If search fails, fall back to listing recent issues and filtering client-side
+                const listResponse = await fetch(`https://api.github.com/repos/${config.owner}/${config.repo}/issues?state=all&per_page=50&sort=updated`, {
+                    headers: {
+                        Authorization: `Bearer ${credentials.pat}`,
+                        Accept: 'application/vnd.github.v3+json',
+                        'User-Agent': 'Planner-App',
+                    },
+                });
+                if (!listResponse.ok) {
+                    return [];
+                }
+                const issues = await listResponse.json();
+                const lowerQuery = query.toLowerCase();
+                return issues.filter((issue) => issue.title.toLowerCase().includes(lowerQuery) ||
+                    (issue.body && issue.body.toLowerCase().includes(lowerQuery)));
             }
             const data = await response.json();
             return data.items || [];

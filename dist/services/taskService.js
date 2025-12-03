@@ -82,6 +82,10 @@ export class TaskService {
             updates.push(`priority = $${paramIndex++}`);
             values.push(input.priority);
         }
+        if (input.position_in_backlog !== undefined) {
+            updates.push(`position_in_backlog = $${paramIndex++}`);
+            values.push(input.position_in_backlog);
+        }
         if (updates.length === 0)
             return currentTask;
         updates.push(`updated_at = NOW()`);
@@ -154,10 +158,41 @@ export class TaskService {
     async getDependenciesForTasks(taskIds) {
         if (taskIds.length === 0)
             return [];
-        const placeholders = taskIds.map((_, i) => `$${i + 1}`).join(', ');
+        // Create placeholders for first set (task_id IN)
+        const placeholders1 = taskIds.map((_, i) => `$${i + 1}`).join(', ');
+        // Create placeholders for second set (depends_on_task_id IN), offset by taskIds.length
+        const placeholders2 = taskIds.map((_, i) => `$${i + 1 + taskIds.length}`).join(', ');
         const result = await this.fastify.db.query(`SELECT * FROM task_dependencies
-       WHERE task_id IN (${placeholders}) OR depends_on_task_id IN (${placeholders})`, [...taskIds, ...taskIds]);
+       WHERE task_id IN (${placeholders1}) OR depends_on_task_id IN (${placeholders2})`, [...taskIds, ...taskIds]);
         return result.rows;
+    }
+    /**
+     * Check if adding a dependency would create a circular reference.
+     * Uses recursive CTE to walk the dependency chain.
+     * @param taskId - The task that would depend on dependsOnTaskId
+     * @param dependsOnTaskId - The task that taskId would depend on
+     * @returns true if adding this dependency would create a cycle
+     */
+    async hasCircularDependency(taskId, dependsOnTaskId) {
+        // Check if dependsOnTaskId (or any of its ancestors) already depends on taskId
+        const result = await this.fastify.db.query(`WITH RECURSIVE dep_chain AS (
+        -- Start from the task we want to depend on
+        SELECT task_id, depends_on_task_id, 1 as depth
+        FROM task_dependencies
+        WHERE task_id = $2
+
+        UNION ALL
+
+        -- Walk up the dependency chain
+        SELECT td.task_id, td.depends_on_task_id, dc.depth + 1
+        FROM task_dependencies td
+        INNER JOIN dep_chain dc ON td.task_id = dc.depends_on_task_id
+        WHERE dc.depth < 100
+      )
+      SELECT EXISTS(
+        SELECT 1 FROM dep_chain WHERE depends_on_task_id = $1
+      ) as has_cycle`, [taskId, dependsOnTaskId]);
+        return result.rows[0]?.has_cycle ?? false;
     }
 }
 //# sourceMappingURL=taskService.js.map

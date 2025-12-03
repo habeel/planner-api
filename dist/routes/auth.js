@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { AuthService } from '../services/authService.js';
+import { OrganizationService } from '../services/organizationService.js';
 const registerSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
     name: z.string().optional(),
+    organization_name: z.string().min(1).max(255).optional(),
+    organization_slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens').optional(),
 });
 const loginSchema = z.object({
     email: z.string().email(),
@@ -14,6 +17,7 @@ const refreshSchema = z.object({
 });
 export default async function authRoutes(fastify) {
     const authService = new AuthService(fastify);
+    const orgService = new OrganizationService(fastify);
     // POST /api/auth/register
     fastify.post('/register', async (request, reply) => {
         const parseResult = registerSchema.safeParse(request.body);
@@ -24,13 +28,35 @@ export default async function authRoutes(fastify) {
                 details: parseResult.error.flatten(),
             });
         }
-        const { email, password, name } = parseResult.data;
+        const { email, password, name, organization_name, organization_slug } = parseResult.data;
+        // Check if slug is available if provided
+        if (organization_slug) {
+            const slugAvailable = await orgService.isSlugAvailable(organization_slug);
+            if (!slugAvailable) {
+                return reply.status(409).send({
+                    error: 'Organization slug is already taken',
+                    code: 'SLUG_TAKEN',
+                });
+            }
+        }
         try {
-            const result = await authService.register(email, password, name);
+            const result = await authService.register({
+                email,
+                password,
+                name,
+                organization_name,
+                organization_slug,
+            });
             return reply.status(201).send(result);
         }
         catch (err) {
             if (err.message.includes('duplicate key')) {
+                if (err.message.includes('organizations_slug_key')) {
+                    return reply.status(409).send({
+                        error: 'Organization slug is already taken',
+                        code: 'SLUG_TAKEN',
+                    });
+                }
                 return reply.status(409).send({
                     error: 'Email already registered',
                     code: 'EMAIL_EXISTS',

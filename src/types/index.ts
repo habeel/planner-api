@@ -38,6 +38,7 @@ export interface Env {
 export interface JwtPayload {
   id: string;
   email: string;
+  impersonated_by?: string; // Admin ID when impersonating a user
 }
 
 // User types

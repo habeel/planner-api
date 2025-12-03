@@ -9,3 +9,4 @@ export { default as reportRoutes } from './reports.js';
 export { default as organizationRoutes } from './organizations.js';
 export { default as invitationRoutes } from './invitations.js';
 export { default as billingRoutes, stripeWebhookRoutes } from './billing.js';
+export { default as adminRoutes } from './admin.js';

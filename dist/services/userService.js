@@ -18,7 +18,7 @@ export class UserService {
         const user = userResult.rows[0];
         if (!user)
             return null;
-        const rolesResult = await this.fastify.db.query(`SELECT uwr.role, w.id as workspace_id, w.name as workspace_name, w.owner_id, w.created_at as workspace_created_at
+        const rolesResult = await this.fastify.db.query(`SELECT uwr.role, w.id as workspace_id, w.name as workspace_name, w.owner_id, w.organization_id, w.created_at as workspace_created_at
        FROM user_workspace_roles uwr
        JOIN workspaces w ON w.id = uwr.workspace_id
        WHERE uwr.user_id = $1`, [id]);
@@ -27,6 +27,7 @@ export class UserService {
                 id: row.workspace_id,
                 name: row.workspace_name,
                 owner_id: row.owner_id,
+                organization_id: row.organization_id,
                 created_at: row.workspace_created_at,
             },
             role: row.role,

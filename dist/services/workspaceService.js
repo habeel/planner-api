@@ -2,7 +2,32 @@ export class WorkspaceService {
     constructor(fastify) {
         this.fastify = fastify;
     }
-    async create(name, ownerId) {
+    async create(input) {
+        const client = await this.fastify.db.connect();
+        try {
+            await client.query('BEGIN');
+            const workspaceResult = await client.query(`INSERT INTO workspaces (name, owner_id, organization_id)
+         VALUES ($1, $2, $3)
+         RETURNING *`, [input.name, input.owner_id, input.organization_id]);
+            const workspace = workspaceResult.rows[0];
+            // Add owner as admin
+            await client.query(`INSERT INTO user_workspace_roles (workspace_id, user_id, role)
+         VALUES ($1, $2, 'ADMIN')`, [workspace.id, input.owner_id]);
+            await client.query('COMMIT');
+            return workspace;
+        }
+        catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        }
+        finally {
+            client.release();
+        }
+    }
+    /**
+     * @deprecated Use createWithOrg instead. This is kept for backward compatibility.
+     */
+    async createLegacy(name, ownerId) {
         const client = await this.fastify.db.connect();
         try {
             await client.query('BEGIN');
@@ -32,6 +57,16 @@ export class WorkspaceService {
         const result = await this.fastify.db.query(`SELECT w.* FROM workspaces w
        JOIN user_workspace_roles uwr ON uwr.workspace_id = w.id
        WHERE uwr.user_id = $1`, [userId]);
+        return result.rows;
+    }
+    async getUserWorkspacesInOrg(userId, organizationId) {
+        const result = await this.fastify.db.query(`SELECT w.* FROM workspaces w
+       JOIN user_workspace_roles uwr ON uwr.workspace_id = w.id
+       WHERE uwr.user_id = $1 AND w.organization_id = $2`, [userId, organizationId]);
+        return result.rows;
+    }
+    async getByOrganization(organizationId) {
+        const result = await this.fastify.db.query(`SELECT * FROM workspaces WHERE organization_id = $1 ORDER BY name`, [organizationId]);
         return result.rows;
     }
     async getUserRole(workspaceId, userId) {
