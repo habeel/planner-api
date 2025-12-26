@@ -81,7 +81,9 @@ export class WorkspaceService {
 
   async getById(id: string): Promise<Workspace | null> {
     const result = await this.fastify.db.query<Workspace>(
-      `SELECT * FROM workspaces WHERE id = $1`,
+      `SELECT w.* FROM workspaces w
+       JOIN organizations o ON w.organization_id = o.id
+       WHERE w.id = $1 AND o.is_active = true`,
       [id]
     );
     return result.rows[0] || null;
@@ -101,7 +103,8 @@ export class WorkspaceService {
     const result = await this.fastify.db.query<Workspace>(
       `SELECT w.* FROM workspaces w
        JOIN user_workspace_roles uwr ON uwr.workspace_id = w.id
-       WHERE uwr.user_id = $1 AND w.organization_id = $2`,
+       JOIN organizations o ON o.id = w.organization_id
+       WHERE uwr.user_id = $1 AND w.organization_id = $2 AND o.is_active = true`,
       [userId, organizationId]
     );
     return result.rows;
@@ -109,7 +112,10 @@ export class WorkspaceService {
 
   async getByOrganization(organizationId: string): Promise<Workspace[]> {
     const result = await this.fastify.db.query<Workspace>(
-      `SELECT * FROM workspaces WHERE organization_id = $1 ORDER BY name`,
+      `SELECT w.* FROM workspaces w
+       JOIN organizations o ON w.organization_id = o.id
+       WHERE w.organization_id = $1 AND o.is_active = true
+       ORDER BY w.name`,
       [organizationId]
     );
     return result.rows;
@@ -117,8 +123,10 @@ export class WorkspaceService {
 
   async getUserRole(workspaceId: string, userId: string): Promise<WorkspaceRole | null> {
     const result = await this.fastify.db.query<UserWorkspaceRole>(
-      `SELECT role FROM user_workspace_roles
-       WHERE workspace_id = $1 AND user_id = $2`,
+      `SELECT uwr.role FROM user_workspace_roles uwr
+       JOIN workspaces w ON w.id = uwr.workspace_id
+       JOIN organizations o ON o.id = w.organization_id
+       WHERE uwr.workspace_id = $1 AND uwr.user_id = $2 AND o.is_active = true`,
       [workspaceId, userId]
     );
     return (result.rows[0]?.role as WorkspaceRole) || null;

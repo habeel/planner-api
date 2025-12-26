@@ -76,7 +76,7 @@ export interface UserWorkspaceRole {
 }
 
 // Task types
-export type TaskStatus = 'BACKLOG' | 'PLANNED' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE';
+export type TaskStatus = 'BACKLOG' | 'PLANNED' | 'IN_PROGRESS' | 'BLOCKED' | 'ON_HOLD' | 'DONE';
 export type TaskPriority = 'LOW' | 'MED' | 'HIGH' | 'CRITICAL';
 export type TaskSource = 'manual' | 'jira' | 'github';
 
@@ -94,6 +94,7 @@ export interface Task {
   source: TaskSource;
   jira_key: string | null;
   github_issue_number: number | null;
+  project: string | null;
   metadata: Record<string, unknown> | null;
   created_at: Date;
   updated_at: Date;
@@ -288,6 +289,8 @@ export interface Organization {
   name: string;
   slug: string;
   owner_id: string | null;
+  owner_email?: string; // Optional: populated in getUserOrganizations
+  owner_name?: string | null; // Optional: populated in getUserOrganizations
   plan: PlanType;
   plan_limits: PlanLimits;
   billing_email: string | null;

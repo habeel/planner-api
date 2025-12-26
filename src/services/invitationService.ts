@@ -171,13 +171,24 @@ export class InvitationService {
         [invitation.organization_id, userId, invitation.role]
       );
 
-      // If workspace_id is specified, add user to that workspace too
+      // If workspace_id is specified, add user to that workspace
       if (invitation.workspace_id && invitation.workspace_role) {
         await client.query(
           `INSERT INTO user_workspace_roles (workspace_id, user_id, role)
            VALUES ($1, $2, $3)
            ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = $3`,
           [invitation.workspace_id, userId, invitation.workspace_role]
+        );
+      } else {
+        // No specific workspace specified - add user to all workspaces in the org
+        // with a default role of DEVELOPER
+        await client.query(
+          `INSERT INTO user_workspace_roles (workspace_id, user_id, role)
+           SELECT w.id, $2, 'DEVELOPER'
+           FROM workspaces w
+           WHERE w.organization_id = $1
+           ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+          [invitation.organization_id, userId]
         );
       }
 

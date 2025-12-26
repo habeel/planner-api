@@ -203,9 +203,10 @@ export class OrganizationService {
 
   async getUserOrganizations(userId: string): Promise<Organization[]> {
     const result = await this.fastify.db.query<Organization>(
-      `SELECT o.*
+      `SELECT o.*, u.email as owner_email, u.name as owner_name
        FROM organizations o
        JOIN user_organization_roles uor ON o.id = uor.organization_id
+       LEFT JOIN users u ON o.owner_id = u.id
        WHERE uor.user_id = $1 AND o.is_active = true
        ORDER BY o.name`,
       [userId]

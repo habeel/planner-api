@@ -20,17 +20,20 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy built files and production dependencies
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY package*.json ./
-
 # Set environment
 ENV NODE_ENV=production
 
-# Create non-root user for security
+# Create non-root user for security BEFORE copying files
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
+
+# Copy built files with correct ownership
+COPY --chown=nodejs:nodejs --from=builder /app/dist ./dist
+COPY --chown=nodejs:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=nodejs:nodejs package*.json ./
+
+# Copy migration files (migrations use tsx to run TypeScript directly)
+COPY --chown=nodejs:nodejs --from=builder /app/src/db ./src/db
 
 USER nodejs
 

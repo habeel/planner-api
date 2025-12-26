@@ -14,6 +14,7 @@ export interface CreateTaskInput {
   source?: TaskSource;
   jira_key?: string;
   github_issue_number?: number;
+  project?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -26,6 +27,7 @@ export interface UpdateTaskInput {
   due_date?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  project?: string | null;
   position_in_backlog?: number | null;
 }
 
@@ -46,8 +48,8 @@ export class TaskService {
       `INSERT INTO tasks (
         workspace_id, title, description, estimated_hours,
         assigned_to_user_id, start_date, due_date, status, priority,
-        source, jira_key, github_issue_number, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        source, jira_key, github_issue_number, project, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *`,
       [
         input.workspace_id,
@@ -62,6 +64,7 @@ export class TaskService {
         input.source || 'manual',
         input.jira_key || null,
         input.github_issue_number || null,
+        input.project || null,
         input.metadata ? JSON.stringify(input.metadata) : null,
       ]
     );
@@ -133,6 +136,10 @@ export class TaskService {
     if (input.priority !== undefined) {
       updates.push(`priority = $${paramIndex++}`);
       values.push(input.priority);
+    }
+    if (input.project !== undefined) {
+      updates.push(`project = $${paramIndex++}`);
+      values.push(input.project);
     }
     if (input.position_in_backlog !== undefined) {
       updates.push(`position_in_backlog = $${paramIndex++}`);

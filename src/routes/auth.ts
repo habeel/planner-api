@@ -20,6 +20,24 @@ const refreshSchema = z.object({
   refreshToken: z.string(),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+
+const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
 export default async function authRoutes(fastify: FastifyInstance) {
   const authService = new AuthService(fastify);
   const orgService = new OrganizationService(fastify);
@@ -135,5 +153,123 @@ export default async function authRoutes(fastify: FastifyInstance) {
     await authService.logout(refreshToken);
 
     return reply.send({ success: true });
+  });
+
+  // POST /api/auth/forgot-password
+  fastify.post('/forgot-password', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = forgotPasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid input',
+        code: 'INVALID_INPUT',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { email } = parseResult.data;
+    await authService.requestPasswordReset(email);
+
+    // Always return success to prevent email enumeration
+    return reply.send({
+      success: true,
+      message: 'If an account exists with that email, a password reset link has been sent.',
+    });
+  });
+
+  // POST /api/auth/reset-password
+  fastify.post('/reset-password', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = resetPasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid input',
+        code: 'INVALID_INPUT',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { token, password } = parseResult.data;
+    const result = await authService.resetPassword(token, password);
+
+    if (!result.success) {
+      return reply.status(400).send({
+        error: result.error,
+        code: 'RESET_FAILED',
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: 'Password has been reset successfully. Please log in with your new password.',
+    });
+  });
+
+  // POST /api/auth/change-password (requires authentication)
+  fastify.post('/change-password', {
+    preHandler: [fastify.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = changePasswordSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid input',
+        code: 'INVALID_INPUT',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { currentPassword, newPassword } = parseResult.data;
+    const result = await authService.changePassword(request.user.id, currentPassword, newPassword);
+
+    if (!result.success) {
+      return reply.status(400).send({
+        error: result.error,
+        code: 'CHANGE_PASSWORD_FAILED',
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: 'Password changed successfully.',
+    });
+  });
+
+  // POST /api/auth/send-verification (requires authentication)
+  fastify.post('/send-verification', {
+    preHandler: [fastify.authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const result = await authService.sendVerificationEmail(request.user.id);
+
+    return reply.send({
+      success: result.success,
+      message: result.success
+        ? 'Verification email sent. Please check your inbox.'
+        : 'Failed to send verification email.',
+    });
+  });
+
+  // POST /api/auth/verify-email
+  fastify.post('/verify-email', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseResult = verifyEmailSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'Invalid input',
+        code: 'INVALID_INPUT',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { token } = parseResult.data;
+    const result = await authService.verifyEmail(token);
+
+    if (!result.success) {
+      return reply.status(400).send({
+        error: result.error,
+        code: 'VERIFICATION_FAILED',
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: 'Email verified successfully.',
+    });
   });
 }

@@ -119,4 +119,94 @@ export class UserService {
     );
     return result.rows;
   }
+
+  /**
+   * Delete a user account and all associated data.
+   * For GDPR compliance, this performs a hard delete of user data.
+   */
+  async deleteAccount(userId: string): Promise<{ success: boolean; error?: string }> {
+    const client = await this.fastify.db.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if user owns any organizations
+      const ownedOrgsResult = await client.query(
+        `SELECT id, name FROM organizations WHERE owner_id = $1`,
+        [userId]
+      );
+
+      if (ownedOrgsResult.rows.length > 0) {
+        // For simplicity, we don't allow deleting accounts that own organizations
+        // User must transfer ownership first or delete the organization
+        return {
+          success: false,
+          error: 'You must transfer ownership or delete your organizations before deleting your account.',
+        };
+      }
+
+      // Delete refresh tokens
+      await client.query(
+        `DELETE FROM refresh_tokens WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Delete password reset tokens
+      await client.query(
+        `DELETE FROM password_reset_tokens WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Delete email verification tokens
+      await client.query(
+        `DELETE FROM email_verification_tokens WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Delete user workspace roles
+      await client.query(
+        `DELETE FROM user_workspace_roles WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Delete user organization roles
+      await client.query(
+        `DELETE FROM user_organization_roles WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Unassign tasks but keep them (set assigned_to_user_id to null)
+      await client.query(
+        `UPDATE tasks SET assigned_to_user_id = NULL WHERE assigned_to_user_id = $1`,
+        [userId]
+      );
+
+      // Delete time entries by user
+      await client.query(
+        `DELETE FROM time_entries WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Delete time off records
+      await client.query(
+        `DELETE FROM time_off WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Finally, delete the user
+      await client.query(
+        `DELETE FROM users WHERE id = $1`,
+        [userId]
+      );
+
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error deleting account:', err);
+      return { success: false, error: 'Failed to delete account. Please try again.' };
+    } finally {
+      client.release();
+    }
+  }
 }
