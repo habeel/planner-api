@@ -50,7 +50,9 @@ export class WorkspaceService {
         }
     }
     async getById(id) {
-        const result = await this.fastify.db.query(`SELECT * FROM workspaces WHERE id = $1`, [id]);
+        const result = await this.fastify.db.query(`SELECT w.* FROM workspaces w
+       JOIN organizations o ON w.organization_id = o.id
+       WHERE w.id = $1 AND o.is_active = true`, [id]);
         return result.rows[0] || null;
     }
     async getUserWorkspaces(userId) {
@@ -62,16 +64,22 @@ export class WorkspaceService {
     async getUserWorkspacesInOrg(userId, organizationId) {
         const result = await this.fastify.db.query(`SELECT w.* FROM workspaces w
        JOIN user_workspace_roles uwr ON uwr.workspace_id = w.id
-       WHERE uwr.user_id = $1 AND w.organization_id = $2`, [userId, organizationId]);
+       JOIN organizations o ON o.id = w.organization_id
+       WHERE uwr.user_id = $1 AND w.organization_id = $2 AND o.is_active = true`, [userId, organizationId]);
         return result.rows;
     }
     async getByOrganization(organizationId) {
-        const result = await this.fastify.db.query(`SELECT * FROM workspaces WHERE organization_id = $1 ORDER BY name`, [organizationId]);
+        const result = await this.fastify.db.query(`SELECT w.* FROM workspaces w
+       JOIN organizations o ON w.organization_id = o.id
+       WHERE w.organization_id = $1 AND o.is_active = true
+       ORDER BY w.name`, [organizationId]);
         return result.rows;
     }
     async getUserRole(workspaceId, userId) {
-        const result = await this.fastify.db.query(`SELECT role FROM user_workspace_roles
-       WHERE workspace_id = $1 AND user_id = $2`, [workspaceId, userId]);
+        const result = await this.fastify.db.query(`SELECT uwr.role FROM user_workspace_roles uwr
+       JOIN workspaces w ON w.id = uwr.workspace_id
+       JOIN organizations o ON o.id = w.organization_id
+       WHERE uwr.workspace_id = $1 AND uwr.user_id = $2 AND o.is_active = true`, [workspaceId, userId]);
         return result.rows[0]?.role || null;
     }
     async addMember(workspaceId, userId, role) {

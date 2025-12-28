@@ -16,6 +16,14 @@ const envSchema = z.object({
     // Email (optional - email features disabled if not set)
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().email().default('noreply@example.com'),
+    // AI (optional - AI features disabled if not set)
+    OPENAI_API_KEY: z.string().optional(),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    AI_DEFAULT_PROVIDER: z.enum(['openai', 'anthropic']).default('openai'),
+    AI_DEFAULT_MODEL: z.string().default('gpt-4o-mini'),
+    AI_MAX_TOKENS_PER_REQUEST: z.string().default('4000').transform(Number),
+    AI_TEMPERATURE: z.string().default('0.7').transform(Number),
+    AI_MONTHLY_TOKEN_LIMIT_DEFAULT: z.string().default('200000').transform(Number),
 });
 export function loadConfig() {
     const result = envSchema.safeParse(process.env);

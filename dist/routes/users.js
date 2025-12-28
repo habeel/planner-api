@@ -37,5 +37,19 @@ export default async function userRoutes(fastify) {
         }
         return reply.send({ user: updatedUser });
     });
+    // DELETE /api/users/me - Delete account
+    fastify.delete('/me', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+        const result = await userService.deleteAccount(request.user.id);
+        if (!result.success) {
+            return reply.status(400).send({
+                error: result.error || 'Failed to delete account',
+                code: 'DELETE_FAILED',
+            });
+        }
+        return reply.send({
+            success: true,
+            message: 'Your account has been permanently deleted.',
+        });
+    });
 }
 //# sourceMappingURL=users.js.map

@@ -32,6 +32,14 @@ export interface Env {
   // Email (optional)
   RESEND_API_KEY?: string;
   EMAIL_FROM: string;
+  // AI (optional)
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  AI_DEFAULT_PROVIDER: 'openai' | 'anthropic';
+  AI_DEFAULT_MODEL: string;
+  AI_MAX_TOKENS_PER_REQUEST: number;
+  AI_TEMPERATURE: number;
+  AI_MONTHLY_TOKEN_LIMIT_DEFAULT: number;
 }
 
 // JWT Payload
@@ -340,4 +348,92 @@ export interface OrganizationUsage {
   workspaces: number;
   integrations: number;
   tasks: number;
+}
+
+// AI Project Manager types
+export type AIProvider = 'openai' | 'anthropic';
+export type AIMessageRole = 'user' | 'assistant' | 'system';
+
+export interface AIConversation {
+  id: string;
+  workspace_id: string;
+  created_by_user_id: string;
+  title: string | null;
+  is_archived: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface AIMessage {
+  id: string;
+  conversation_id: string;
+  role: AIMessageRole;
+  content: string;
+  structured_data: AIStructuredData | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  model: string | null;
+  created_at: Date;
+}
+
+export interface AIUsage {
+  id: string;
+  workspace_id: string;
+  month: Date;
+  input_tokens_used: number;
+  output_tokens_used: number;
+  request_count: number;
+}
+
+export interface AISettings {
+  workspace_id: string;
+  enabled: boolean;
+  preferred_provider: AIProvider;
+  preferred_model: string;
+  monthly_token_limit: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// AI Structured Data types for rich responses
+export type AIStructuredData =
+  | TaskSuggestionsData
+  | ScheduleSuggestionData
+  | CapacityOverviewData;
+
+export interface TaskSuggestionsData {
+  type: 'task_suggestions';
+  tasks: {
+    tempId: string;
+    title: string;
+    description?: string;
+    estimatedHours: number;
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    suggestedAssignee?: string;
+    category?: string;
+  }[];
+}
+
+export interface ScheduleSuggestionData {
+  type: 'schedule_suggestion';
+  changes: {
+    taskId: string;
+    action: 'move' | 'reassign' | 'resize';
+    from: { startDate?: string; assigneeId?: string; hours?: number };
+    to: { startDate?: string; assigneeId?: string; hours?: number };
+    reason: string;
+  }[];
+}
+
+export interface CapacityOverviewData {
+  type: 'capacity_overview';
+  period: { start: string; end: string };
+  team: {
+    userId: string;
+    name: string;
+    capacity: number;
+    allocated: number;
+    available: number;
+    status: 'available' | 'busy' | 'overloaded';
+  }[];
 }

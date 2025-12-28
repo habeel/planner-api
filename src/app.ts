@@ -15,6 +15,7 @@ import {
   stripeWebhookRoutes,
   adminRoutes,
   timeOffRoutes,
+  aiRoutes,
 } from './routes/index.js';
 
 export async function buildApp() {
@@ -56,6 +57,7 @@ export async function buildApp() {
   await fastify.register(reportRoutes, { prefix: '/api/workspaces' });
   await fastify.register(adminRoutes, { prefix: '/api/admin' });
   await fastify.register(timeOffRoutes, { prefix: '/api' });
+  await fastify.register(aiRoutes, { prefix: '/api/ai' });
 
   // Health check endpoint
   fastify.get('/health', async (request, reply) => {

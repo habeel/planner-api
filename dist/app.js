@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { envPlugin, corsPlugin, postgresPlugin, authPlugin, emailPlugin, rateLimitPlugin, helmetPlugin, adminAuthPlugin } from './plugins/index.js';
-import { authRoutes, userRoutes, workspaceRoutes, taskRoutes, timeEntryRoutes, planningRoutes, integrationRoutes, reportRoutes, organizationRoutes, invitationRoutes, billingRoutes, stripeWebhookRoutes, adminRoutes, } from './routes/index.js';
+import { authRoutes, userRoutes, workspaceRoutes, taskRoutes, timeEntryRoutes, planningRoutes, integrationRoutes, reportRoutes, organizationRoutes, invitationRoutes, billingRoutes, stripeWebhookRoutes, adminRoutes, timeOffRoutes, aiRoutes, } from './routes/index.js';
 export async function buildApp() {
     const fastify = Fastify({
         logger: {
@@ -37,6 +37,8 @@ export async function buildApp() {
     await fastify.register(integrationRoutes, { prefix: '/api/integrations' });
     await fastify.register(reportRoutes, { prefix: '/api/workspaces' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
+    await fastify.register(timeOffRoutes, { prefix: '/api' });
+    await fastify.register(aiRoutes, { prefix: '/api/ai' });
     // Health check endpoint
     fastify.get('/health', async (request, reply) => {
         try {
