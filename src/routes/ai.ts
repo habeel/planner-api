@@ -8,6 +8,8 @@ const chatSchema = z.object({
   workspaceId: z.string().uuid(),
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1).max(4000),
+  projectId: z.string().uuid().optional(),
+  epicId: z.string().uuid().optional(),
 });
 
 const conversationQuerySchema = z.object({
@@ -110,7 +112,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const { workspaceId, conversationId, message } = parseResult.data;
+      const { workspaceId, conversationId, message, projectId, epicId } = parseResult.data;
       const userId = request.user.id;
 
       if (!(await checkAIAccess(workspaceId, userId, reply))) {
@@ -133,11 +135,21 @@ export default async function aiRoutes(fastify: FastifyInstance) {
       }
 
       try {
+        // If projectId provided, update conversation to link to project
+        if (projectId && conversationId) {
+          await fastify.db.query(
+            `UPDATE ai_conversations SET project_id = $1 WHERE id = $2`,
+            [projectId, conversationId]
+          );
+        }
+
         const result = await aiService.chat({
           workspaceId,
           userId,
           message,
           conversationId,
+          projectId,
+          epicId,
         });
 
         return reply.send({

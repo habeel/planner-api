@@ -8,11 +8,25 @@ import {
   type TaskSummary,
   type TeamMemberCapacity,
 } from '../context/builder.js';
+import {
+  buildProjectContext,
+  formatProjectContextForPrompt,
+} from '../context/projectContext.js';
+import { ProjectService } from '../../projectService.js';
+import type { FastifyInstance } from 'fastify';
+import type { EpicDependencyType, TaskPriority } from '../../../types/index.js';
 
 export interface FunctionResult {
   success: boolean;
   data?: unknown;
   error?: string;
+}
+
+export interface ExecuteFunctionContext {
+  db: Pool;
+  workspaceId: string;
+  userId: string;
+  fastify?: FastifyInstance;
 }
 
 /**
@@ -21,9 +35,17 @@ export interface FunctionResult {
 export async function executeFunctionCall(
   db: Pool,
   workspaceId: string,
-  toolCall: ToolCall
+  toolCall: ToolCall,
+  userId?: string,
+  fastify?: FastifyInstance
 ): Promise<ToolMessage> {
-  const result = await executeFunction(db, workspaceId, toolCall.name, toolCall.arguments);
+  const context: ExecuteFunctionContext = {
+    db,
+    workspaceId,
+    userId: userId || '',
+    fastify,
+  };
+  const result = await executeFunction(context, toolCall.name, toolCall.arguments);
 
   return {
     role: 'tool',
@@ -36,11 +58,12 @@ export async function executeFunctionCall(
  * Execute a function by name with the given arguments.
  */
 async function executeFunction(
-  db: Pool,
-  workspaceId: string,
+  ctx: ExecuteFunctionContext,
   functionName: string,
   args: Record<string, unknown>
 ): Promise<FunctionResult> {
+  const { db, workspaceId } = ctx;
+
   try {
     switch (functionName) {
       case 'get_team_capacity':
@@ -58,6 +81,19 @@ async function executeFunction(
       case 'get_overloaded_users':
         return await handleGetOverloadedUsers(db, workspaceId, args);
 
+      // Project & Epic functions
+      case 'get_project_context':
+        return await handleGetProjectContext(db, args);
+
+      case 'create_project_with_epics':
+        return await handleCreateProjectWithEpics(ctx, args);
+
+      case 'create_stories_for_epic':
+        return await handleCreateStoriesForEpic(ctx, args);
+
+      case 'add_epic_dependency':
+        return await handleAddEpicDependency(ctx, args);
+
       default:
         return {
           success: false,
@@ -65,6 +101,7 @@ async function executeFunction(
         };
     }
   } catch (error) {
+    console.error(`AI function "${functionName}" failed:`, error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -443,4 +480,210 @@ function getCurrentWeekStart(): string {
   const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust for Sunday
   const monday = new Date(now.setDate(diff));
   return monday.toISOString().split('T')[0]!;
+}
+
+// ============================================
+// PROJECT & EPIC FUNCTION HANDLERS
+// ============================================
+
+/**
+ * Get full project context for AI conversations.
+ */
+async function handleGetProjectContext(
+  db: Pool,
+  args: Record<string, unknown>
+): Promise<FunctionResult> {
+  const projectId = args.projectId as string;
+
+  if (!projectId) {
+    return {
+      success: false,
+      error: 'projectId is required',
+    };
+  }
+
+  const context = await buildProjectContext(db, projectId);
+
+  if (!context) {
+    return {
+      success: false,
+      error: 'Project not found',
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      context: formatProjectContextForPrompt(context),
+      raw: context,
+    },
+  };
+}
+
+/**
+ * Create a new project with initial epic structure.
+ */
+async function handleCreateProjectWithEpics(
+  ctx: ExecuteFunctionContext,
+  args: Record<string, unknown>
+): Promise<FunctionResult> {
+  const { fastify, userId, workspaceId: ctxWorkspaceId } = ctx;
+
+  if (!fastify) {
+    return {
+      success: false,
+      error: 'Fastify instance not available for project creation',
+    };
+  }
+
+  if (!userId) {
+    return {
+      success: false,
+      error: 'User ID is required for project creation',
+    };
+  }
+
+  // Always use context's workspaceId - the AI may pass workspace name instead of UUID
+  const workspaceId = ctxWorkspaceId;
+  const name = args.name as string;
+  const description = args.description as string | undefined;
+  const goals = args.goals as string | undefined;
+  const epics = args.epics as Array<{
+    name: string;
+    description?: string;
+    estimatedWeeks?: number;
+  }>;
+
+  if (!workspaceId || !name || !epics || !Array.isArray(epics)) {
+    console.error('create_project_with_epics validation failed:', { workspaceId, name, epics: !!epics, isArray: Array.isArray(epics) });
+    return {
+      success: false,
+      error: 'workspaceId, name, and epics are required',
+    };
+  }
+
+  const projectService = new ProjectService(fastify);
+
+  // Create project
+  const project = await projectService.create({
+    workspace_id: workspaceId,
+    name,
+    description,
+    goals,
+    created_by: userId,
+  });
+
+  // Create epics
+  const createdEpics = await projectService.createEpicsForProject(
+    project.id,
+    workspaceId,
+    epics.map((e) => ({
+      name: e.name,
+      description: e.description,
+      estimated_weeks: e.estimatedWeeks,
+    }))
+  );
+
+  return {
+    success: true,
+    data: {
+      projectId: project.id,
+      projectName: project.name,
+      epicCount: createdEpics.length,
+      epics: createdEpics.map((e) => ({ id: e.id, name: e.name })),
+      message: `Created project "${project.name}" with ${createdEpics.length} epics`,
+    },
+  };
+}
+
+/**
+ * Create stories/tasks for an epic.
+ */
+async function handleCreateStoriesForEpic(
+  ctx: ExecuteFunctionContext,
+  args: Record<string, unknown>
+): Promise<FunctionResult> {
+  const { fastify, workspaceId: ctxWorkspaceId } = ctx;
+
+  if (!fastify) {
+    return {
+      success: false,
+      error: 'Fastify instance not available for story creation',
+    };
+  }
+
+  const epicId = args.epicId as string;
+  // Always use context's workspaceId - the AI may pass workspace name instead of UUID
+  const workspaceId = ctxWorkspaceId;
+  const stories = args.stories as Array<{
+    title: string;
+    description?: string;
+    estimatedHours?: number;
+    priority?: TaskPriority;
+  }>;
+
+  if (!epicId || !workspaceId || !stories || !Array.isArray(stories)) {
+    console.error('create_stories_for_epic validation failed:', { epicId, workspaceId, stories: !!stories, isArray: Array.isArray(stories) });
+    return {
+      success: false,
+      error: 'epicId, workspaceId, and stories are required',
+    };
+  }
+
+  const projectService = new ProjectService(fastify);
+
+  await projectService.createStoriesForEpic(epicId, workspaceId, stories);
+
+  return {
+    success: true,
+    data: {
+      storyCount: stories.length,
+      message: `Created ${stories.length} stories for the epic`,
+    },
+  };
+}
+
+/**
+ * Add a dependency between two epics.
+ */
+async function handleAddEpicDependency(
+  ctx: ExecuteFunctionContext,
+  args: Record<string, unknown>
+): Promise<FunctionResult> {
+  const { fastify } = ctx;
+
+  if (!fastify) {
+    return {
+      success: false,
+      error: 'Fastify instance not available for adding dependency',
+    };
+  }
+
+  const epicId = args.epicId as string;
+  const dependsOnEpicId = args.dependsOnEpicId as string;
+  const type = (args.type as EpicDependencyType) || 'blocks';
+
+  if (!epicId || !dependsOnEpicId) {
+    return {
+      success: false,
+      error: 'epicId and dependsOnEpicId are required',
+    };
+  }
+
+  const projectService = new ProjectService(fastify);
+
+  try {
+    await projectService.addDependency(epicId, dependsOnEpicId, type);
+    return {
+      success: true,
+      data: {
+        message: 'Dependency added successfully',
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to add dependency',
+    };
+  }
 }

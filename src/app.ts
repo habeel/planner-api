@@ -16,6 +16,8 @@ import {
   adminRoutes,
   timeOffRoutes,
   aiRoutes,
+  projectRoutes,
+  epicRoutes,
 } from './routes/index.js';
 
 export async function buildApp() {
@@ -58,6 +60,8 @@ export async function buildApp() {
   await fastify.register(adminRoutes, { prefix: '/api/admin' });
   await fastify.register(timeOffRoutes, { prefix: '/api' });
   await fastify.register(aiRoutes, { prefix: '/api/ai' });
+  await fastify.register(projectRoutes, { prefix: '/api/projects' });
+  await fastify.register(epicRoutes, { prefix: '/api/epics' });
 
   // Health check endpoint
   fastify.get('/health', async (request, reply) => {

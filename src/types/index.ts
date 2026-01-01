@@ -437,3 +437,62 @@ export interface CapacityOverviewData {
     status: 'available' | 'busy' | 'overloaded';
   }[];
 }
+
+// ============================================
+// PROJECT & EPIC TYPES
+// ============================================
+
+export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+
+export type EpicStatus =
+  | 'draft'
+  | 'ready_for_breakdown'
+  | 'breaking_down'
+  | 'ready'
+  | 'in_progress'
+  | 'done';
+
+export type EpicDependencyType = 'blocks' | 'related' | 'informs';
+
+export interface Project {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  goals: string | null;
+  status: ProjectStatus;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Epic {
+  id: string;
+  project_id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  status: EpicStatus;
+  priority: TaskPriority;
+  estimated_weeks: number | null;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface EpicDependency {
+  epic_id: string;
+  depends_on_epic_id: string;
+  dependency_type: EpicDependencyType;
+  created_at: Date;
+}
+
+export interface ProjectWithEpics extends Project {
+  epics: EpicWithDependencies[];
+}
+
+export interface EpicWithDependencies extends Epic {
+  dependencies: EpicDependency[];
+  dependents: EpicDependency[];
+  story_count: number;
+}

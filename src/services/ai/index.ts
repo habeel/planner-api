@@ -20,6 +20,13 @@ import {
   checkUsageLimit,
 } from './usage/tracker.js';
 import { executeFunctionCall } from './functions/executor.js';
+import { detectLargeProject, shouldSuggestWizard } from './detection/projectDetector.js';
+import { buildProjectContext } from './context/projectContext.js';
+import {
+  getProjectDetectionPrompt,
+  getProjectAwarePromptAddition,
+  getEpicBreakdownPrompt,
+} from './prompts/projectPrompts.js';
 
 // Maximum number of function call rounds to prevent infinite loops
 const MAX_FUNCTION_CALL_ROUNDS = 5;
@@ -29,6 +36,8 @@ export interface ChatInput {
   userId: string;
   message: string;
   conversationId?: string;
+  projectId?: string;
+  epicId?: string;
 }
 
 export interface ChatResult {
@@ -217,7 +226,7 @@ export class AIService {
       throw new Error('AI provider not configured');
     }
 
-    const { workspaceId, userId, message, conversationId } = input;
+    const { workspaceId, userId, message, conversationId, projectId, epicId } = input;
     const config = this.fastify.config;
 
     // Check usage limits
@@ -260,7 +269,43 @@ export class AIService {
     );
 
     // Prepare messages for AI
-    const systemPrompt = getSystemPrompt(workspaceContext);
+    let systemPrompt = getSystemPrompt(workspaceContext);
+
+    // Determine effective project/epic context
+    // Priority: explicit params > conversation's project_id
+    const conversationProjectId = (conversation as AIConversation & { project_id?: string }).project_id;
+    const effectiveProjectId = projectId || conversationProjectId;
+
+    // If epic context provided, add epic breakdown prompt
+    if (epicId && effectiveProjectId) {
+      const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
+      const epic = projectContext?.epics.find(e => e.id === epicId);
+      if (epic && projectContext) {
+        systemPrompt += '\n\n' + getEpicBreakdownPrompt(
+          projectContext,
+          epic.name,
+          epic.description
+        );
+      }
+    }
+    // If project context provided (but no epicId), add project awareness
+    else if (effectiveProjectId) {
+      const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
+      if (projectContext) {
+        systemPrompt += '\n\n' + getProjectAwarePromptAddition(projectContext);
+      }
+    }
+    // Otherwise, check for large project detection on new conversations
+    else if (!conversationId) {
+      const detection = detectLargeProject(message);
+      if (shouldSuggestWizard(detection)) {
+        // Inject project detection prompt
+        systemPrompt += '\n\n' + getProjectDetectionPrompt(
+          detection.suggestedName,
+          detection.suggestedEpics
+        );
+      }
+    }
 
     // Summarize if conversation is long
     const conversationMessages = await summarizeConversationHistory(
@@ -293,7 +338,7 @@ export class AIService {
       // Execute all function calls in parallel
       const toolResults = await Promise.all(
         response.toolCalls.map((tc) =>
-          executeFunctionCall(this.fastify.db, workspaceId, tc)
+          executeFunctionCall(this.fastify.db, workspaceId, tc, userId, this.fastify)
         )
       );
 

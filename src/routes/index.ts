@@ -12,3 +12,4 @@ export { default as billingRoutes, stripeWebhookRoutes } from './billing.js';
 export { default as adminRoutes } from './admin.js';
 export { default as timeOffRoutes } from './timeOff.js';
 export { default as aiRoutes } from './ai.js';
+export { default as projectRoutes, epicRoutes } from './projects.js';

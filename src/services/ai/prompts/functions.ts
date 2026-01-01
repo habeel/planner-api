@@ -93,4 +93,117 @@ export const aiFunctions: FunctionDefinition[] = [
       },
     },
   },
+  // Project & Epic functions
+  {
+    name: 'get_project_context',
+    description:
+      'Get full context for a project including all epics, their status, dependencies, and cross-epic patterns. Use this before providing advice about a project.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID to get context for',
+        },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'create_project_with_epics',
+    description:
+      'Create a new project with initial epic structure. Use after discussing project scope with user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        workspaceId: {
+          type: 'string',
+          description: 'The workspace ID',
+        },
+        name: {
+          type: 'string',
+          description: 'Project name',
+        },
+        description: {
+          type: 'string',
+          description: 'Project description',
+        },
+        goals: {
+          type: 'string',
+          description: 'Success criteria and goals',
+        },
+        epics: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              description: { type: 'string' },
+              estimatedWeeks: { type: 'number' },
+            },
+            required: ['name'],
+          },
+          description: 'Initial epics to create',
+        },
+      },
+      required: ['workspaceId', 'name', 'epics'],
+    },
+  },
+  {
+    name: 'create_stories_for_epic',
+    description:
+      'Create stories/tasks for an epic. Use after breaking down an epic with the user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        epicId: {
+          type: 'string',
+          description: 'The epic ID to add stories to',
+        },
+        workspaceId: {
+          type: 'string',
+          description: 'The workspace ID',
+        },
+        stories: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              estimatedHours: { type: 'number' },
+              priority: { type: 'string', enum: ['LOW', 'MED', 'HIGH', 'CRITICAL'] },
+            },
+            required: ['title'],
+          },
+          description: 'Stories to create',
+        },
+      },
+      required: ['epicId', 'workspaceId', 'stories'],
+    },
+  },
+  {
+    name: 'add_epic_dependency',
+    description:
+      'Add a dependency between two epics. Epic A depends on Epic B means A cannot start until B is done.',
+    parameters: {
+      type: 'object',
+      properties: {
+        epicId: {
+          type: 'string',
+          description: 'The epic that has the dependency',
+        },
+        dependsOnEpicId: {
+          type: 'string',
+          description: 'The epic that must be completed first',
+        },
+        type: {
+          type: 'string',
+          enum: ['blocks', 'related', 'informs'],
+          description: 'Type of dependency',
+        },
+      },
+      required: ['epicId', 'dependsOnEpicId'],
+    },
+  },
 ];
