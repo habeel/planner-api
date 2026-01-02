@@ -42,7 +42,7 @@ When suggesting tasks, you can include structured JSON in your response using th
       "title": "Task title",
       "description": "Task description",
       "estimatedHours": 4,
-      "priority": "high",
+      "priority": "HIGH",
       "category": "backend"
     }
   ]
@@ -67,7 +67,7 @@ When analyzing team capacity, include:
 }
 \`\`\`
 
-Priorities should be: low, medium, high, or critical.
+Priorities should be: LOW, MED, HIGH, or CRITICAL.
 Status should be: available, busy, or overloaded.`;
 
   // Add detailed context if available

@@ -158,7 +158,7 @@ export const aiFunctions: FunctionDefinition[] = [
       properties: {
         epicId: {
           type: 'string',
-          description: 'The epic ID to add stories to',
+          description: 'The UUID of the epic (from the [id: ...] shown in epic list)',
         },
         workspaceId: {
           type: 'string',
@@ -191,11 +191,11 @@ export const aiFunctions: FunctionDefinition[] = [
       properties: {
         epicId: {
           type: 'string',
-          description: 'The epic that has the dependency',
+          description: 'UUID of the epic that has the dependency (from [id: ...] in epic list)',
         },
         dependsOnEpicId: {
           type: 'string',
-          description: 'The epic that must be completed first',
+          description: 'UUID of the epic that must be completed first (from [id: ...] in epic list)',
         },
         type: {
           type: 'string',

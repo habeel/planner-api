@@ -564,19 +564,16 @@ async function handleCreateProjectWithEpics(
 
   const projectService = new ProjectService(fastify);
 
-  // Create project
-  const project = await projectService.create({
-    workspace_id: workspaceId,
-    name,
-    description,
-    goals,
-    created_by: userId,
-  });
-
-  // Create epics
-  const createdEpics = await projectService.createEpicsForProject(
-    project.id,
-    workspaceId,
+  // Create project and epics in a single transaction
+  // If any operation fails, the entire transaction is rolled back
+  const { project, epics: createdEpics } = await projectService.createWithEpics(
+    {
+      workspace_id: workspaceId,
+      name,
+      description,
+      goals,
+      created_by: userId,
+    },
     epics.map((e) => ({
       name: e.name,
       description: e.description,
@@ -630,6 +627,16 @@ async function handleCreateStoriesForEpic(
     };
   }
 
+  // Validate epicId is a valid UUID format
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(epicId)) {
+    console.error('create_stories_for_epic: epicId is not a valid UUID:', epicId);
+    return {
+      success: false,
+      error: `Invalid epicId format. Expected UUID (like "550e8400-e29b-41d4-a716-446655440000"), got: "${epicId}". Use the [id: ...] value shown in the epic list.`,
+    };
+  }
+
   const projectService = new ProjectService(fastify);
 
   await projectService.createStoriesForEpic(epicId, workspaceId, stories);
@@ -667,6 +674,21 @@ async function handleAddEpicDependency(
     return {
       success: false,
       error: 'epicId and dependsOnEpicId are required',
+    };
+  }
+
+  // Validate both IDs are valid UUIDs
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(epicId)) {
+    return {
+      success: false,
+      error: `Invalid epicId format. Expected UUID, got: "${epicId}". Use the [id: ...] value shown in the epic list.`,
+    };
+  }
+  if (!uuidRegex.test(dependsOnEpicId)) {
+    return {
+      success: false,
+      error: `Invalid dependsOnEpicId format. Expected UUID, got: "${dependsOnEpicId}". Use the [id: ...] value shown in the epic list.`,
     };
   }
 

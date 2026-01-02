@@ -4,12 +4,20 @@ import { AIService } from '../services/ai/index.js';
 import { WorkspaceService } from '../services/workspaceService.js';
 
 // Request schemas
+const startWizardSchema = z.object({
+  projectName: z.string().min(1).max(200),
+  detectedScope: z.string().max(500),
+  suggestedEpics: z.array(z.string().max(100)),
+});
+
 const chatSchema = z.object({
   workspaceId: z.string().uuid(),
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1).max(4000),
   projectId: z.string().uuid().optional(),
   epicId: z.string().uuid().optional(),
+  // When starting wizard mode, pass the initial suggestion from the AI
+  startWizard: startWizardSchema.optional(),
 });
 
 const conversationQuerySchema = z.object({
@@ -112,7 +120,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const { workspaceId, conversationId, message, projectId, epicId } = parseResult.data;
+      const { workspaceId, conversationId, message, projectId, epicId, startWizard } = parseResult.data;
       const userId = request.user.id;
 
       if (!(await checkAIAccess(workspaceId, userId, reply))) {
@@ -150,6 +158,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
           conversationId,
           projectId,
           epicId,
+          startWizard,
         });
 
         return reply.send({

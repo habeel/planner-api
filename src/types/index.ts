@@ -399,7 +399,11 @@ export interface AISettings {
 export type AIStructuredData =
   | TaskSuggestionsData
   | ScheduleSuggestionData
-  | CapacityOverviewData;
+  | CapacityOverviewData
+  | ProjectWizardSuggestionData
+  | ProjectWizardProgressData
+  | ProjectWizardReviewData
+  | ProjectCreatedData;
 
 export interface TaskSuggestionsData {
   type: 'task_suggestions';
@@ -408,7 +412,7 @@ export interface TaskSuggestionsData {
     title: string;
     description?: string;
     estimatedHours: number;
-    priority: 'low' | 'medium' | 'high' | 'critical';
+    priority: 'LOW' | 'MED' | 'HIGH' | 'CRITICAL';
     suggestedAssignee?: string;
     category?: string;
   }[];
@@ -436,6 +440,76 @@ export interface CapacityOverviewData {
     available: number;
     status: 'available' | 'busy' | 'overloaded';
   }[];
+}
+
+// Project Wizard Structured Data types
+// Initial suggestion when AI detects a large project
+export interface ProjectWizardSuggestionData {
+  type: 'project_wizard_suggestion';
+  projectName: string;
+  detectedScope: string;
+  suggestedEpics: string[];
+}
+
+// Live-updating progress card during wizard conversation
+export interface ProjectWizardProgressData {
+  type: 'project_wizard_progress';
+  step: 'name' | 'epics' | 'dependencies' | 'review';
+  project: {
+    name: string;
+    description: string;
+    goals: string;
+    confirmed: boolean;
+  };
+  epics: Array<{
+    id: string; // Temporary ID for reference during conversation
+    name: string;
+    description: string;
+    estimatedWeeks: number;
+    priority: 'LOW' | 'MED' | 'HIGH' | 'CRITICAL';
+    confirmed: boolean;
+  }>;
+  dependencies: Array<{
+    fromEpicId: string;
+    toEpicId: string;
+    confirmed: boolean;
+  }>;
+}
+
+// Final review before project creation
+export interface ProjectWizardReviewData {
+  type: 'project_wizard_review';
+  project: {
+    name: string;
+    description: string;
+    goals: string;
+  };
+  epics: Array<{
+    id: string;
+    name: string;
+    description: string;
+    estimatedWeeks: number;
+    priority: 'LOW' | 'MED' | 'HIGH' | 'CRITICAL';
+  }>;
+  dependencies: Array<{
+    fromEpicId: string;
+    fromEpicName: string;
+    toEpicId: string;
+    toEpicName: string;
+  }>;
+  readyToCreate: boolean;
+}
+
+// Success response after project is created
+export interface ProjectCreatedData {
+  type: 'project_created';
+  projectId: string;
+  projectName: string;
+  epicCount: number;
+  epics: Array<{
+    id: string;
+    name: string;
+  }>;
 }
 
 // ============================================

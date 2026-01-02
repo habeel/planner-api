@@ -231,7 +231,7 @@ export function formatProjectContextForPrompt(context: ProjectContext): string {
     for (const epic of context.epics) {
       const statusEmoji = statusEmojis[epic.status] || '•';
 
-      prompt += `\n${statusEmoji} **${epic.name}** (${epic.status})`;
+      prompt += `\n${statusEmoji} **${epic.name}** [id: ${epic.id}] (${epic.status})`;
 
       if (epic.storyCount > 0) {
         prompt += ` - ${epic.storyCount} stories`;

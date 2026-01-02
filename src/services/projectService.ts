@@ -69,6 +69,51 @@ export class ProjectService {
     return result.rows[0]!;
   }
 
+  /**
+   * Create a project with its epics in a single transaction.
+   * If any operation fails, the entire transaction is rolled back.
+   */
+  async createWithEpics(
+    projectInput: CreateProjectInput,
+    epics: Array<{ name: string; description?: string; estimated_weeks?: number }>
+  ): Promise<{ project: Project; epics: Epic[] }> {
+    const client = await this.fastify.db.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Create project
+      const projectResult = await client.query<Project>(
+        `INSERT INTO projects (workspace_id, name, description, goals, created_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [projectInput.workspace_id, projectInput.name, projectInput.description, projectInput.goals, projectInput.created_by]
+      );
+      const project = projectResult.rows[0]!;
+
+      // Create epics
+      const createdEpics: Epic[] = [];
+      for (let i = 0; i < epics.length; i++) {
+        const epic = epics[i]!;
+        const epicResult = await client.query<Epic>(
+          `INSERT INTO epics (project_id, workspace_id, name, description, priority, estimated_weeks, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING *`,
+          [project.id, projectInput.workspace_id, epic.name, epic.description, 'MED', epic.estimated_weeks, i + 1]
+        );
+        createdEpics.push(epicResult.rows[0]!);
+      }
+
+      await client.query('COMMIT');
+      return { project, epics: createdEpics };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async getById(id: string): Promise<Project | null> {
     const result = await this.fastify.db.query<Project>(
       `SELECT * FROM projects WHERE id = $1`,

@@ -20,16 +20,23 @@ import {
   checkUsageLimit,
 } from './usage/tracker.js';
 import { executeFunctionCall } from './functions/executor.js';
-import { detectLargeProject, shouldSuggestWizard } from './detection/projectDetector.js';
 import { buildProjectContext } from './context/projectContext.js';
 import {
-  getProjectDetectionPrompt,
+  getProjectDetectionInstructions,
   getProjectAwarePromptAddition,
   getEpicBreakdownPrompt,
+  getWizardConversationPrompt,
+  type WizardState,
 } from './prompts/projectPrompts.js';
 
 // Maximum number of function call rounds to prevent infinite loops
 const MAX_FUNCTION_CALL_ROUNDS = 5;
+
+export interface WizardStartInput {
+  projectName: string;
+  detectedScope: string;
+  suggestedEpics: string[];
+}
 
 export interface ChatInput {
   workspaceId: string;
@@ -38,6 +45,8 @@ export interface ChatInput {
   conversationId?: string;
   projectId?: string;
   epicId?: string;
+  // When starting wizard mode, pass the initial suggestion
+  startWizard?: WizardStartInput;
 }
 
 export interface ChatResult {
@@ -226,7 +235,7 @@ export class AIService {
       throw new Error('AI provider not configured');
     }
 
-    const { workspaceId, userId, message, conversationId, projectId, epicId } = input;
+    const { workspaceId, userId, message, conversationId, projectId, epicId, startWizard } = input;
     const config = this.fastify.config;
 
     // Check usage limits
@@ -276,34 +285,72 @@ export class AIService {
     const conversationProjectId = (conversation as AIConversation & { project_id?: string }).project_id;
     const effectiveProjectId = projectId || conversationProjectId;
 
-    // If epic context provided, add epic breakdown prompt
-    if (epicId && effectiveProjectId) {
-      const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
-      const epic = projectContext?.epics.find(e => e.id === epicId);
-      if (epic && projectContext) {
-        systemPrompt += '\n\n' + getEpicBreakdownPrompt(
-          projectContext,
-          epic.name,
-          epic.description
-        );
+    // Check if we're in wizard mode
+    // Either starting wizard (from frontend) or continuing (from previous messages)
+    let wizardState: WizardState | undefined;
+
+    if (startWizard) {
+      // Starting wizard mode - inject wizard prompt with initial suggestion
+      systemPrompt += '\n\n' + getWizardConversationPrompt(startWizard);
+    } else {
+      // Check if we're continuing wizard mode from previous messages
+      const lastAssistantMessage = existingMessages
+        .filter(m => m.role === 'assistant')
+        .pop();
+
+      if (lastAssistantMessage?.structured_data) {
+        const data = lastAssistantMessage.structured_data;
+        if (data.type === 'project_wizard_progress') {
+          // Extract wizard state from last progress update
+          const progressData = data as {
+            type: 'project_wizard_progress';
+            step: 'name' | 'epics' | 'dependencies' | 'review';
+            project: { name: string; description: string; goals: string; confirmed: boolean };
+            epics: Array<{ id: string; name: string; description: string; estimatedWeeks: number; priority: 'LOW' | 'MED' | 'HIGH' | 'CRITICAL'; confirmed: boolean }>;
+            dependencies: Array<{ fromEpicId: string; toEpicId: string; confirmed: boolean }>;
+          };
+
+          wizardState = {
+            step: progressData.step,
+            project: progressData.project,
+            epics: progressData.epics,
+            dependencies: progressData.dependencies,
+          };
+
+          // Continue wizard mode with current state
+          systemPrompt += '\n\n' + getWizardConversationPrompt(
+            { projectName: wizardState.project.name, detectedScope: wizardState.project.description, suggestedEpics: [] },
+            wizardState
+          );
+        }
       }
     }
-    // If project context provided (but no epicId), add project awareness
-    else if (effectiveProjectId) {
-      const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
-      if (projectContext) {
-        systemPrompt += '\n\n' + getProjectAwarePromptAddition(projectContext);
+
+    // If not in wizard mode, use standard project/epic context
+    if (!startWizard && !wizardState) {
+      // If epic context provided, add epic breakdown prompt
+      if (epicId && effectiveProjectId) {
+        const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
+        const epic = projectContext?.epics.find(e => e.id === epicId);
+        if (epic && projectContext) {
+          systemPrompt += '\n\n' + getEpicBreakdownPrompt(
+            projectContext,
+            epic.name,
+            epic.description
+          );
+        }
       }
-    }
-    // Otherwise, check for large project detection on new conversations
-    else if (!conversationId) {
-      const detection = detectLargeProject(message);
-      if (shouldSuggestWizard(detection)) {
-        // Inject project detection prompt
-        systemPrompt += '\n\n' + getProjectDetectionPrompt(
-          detection.suggestedName,
-          detection.suggestedEpics
-        );
+      // If project context provided (but no epicId), add project awareness
+      else if (effectiveProjectId) {
+        const projectContext = await buildProjectContext(this.fastify.db, effectiveProjectId);
+        if (projectContext) {
+          systemPrompt += '\n\n' + getProjectAwarePromptAddition(projectContext);
+        }
+      }
+      // For new conversations, always give LLM the ability to detect and suggest projects
+      // The LLM will use its judgment to decide when a project wizard is appropriate
+      else if (!conversationId) {
+        systemPrompt += '\n\n' + getProjectDetectionInstructions();
       }
     }
 
