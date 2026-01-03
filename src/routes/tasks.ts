@@ -13,6 +13,7 @@ const createTaskSchema = z.object({
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   status: z.enum(['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'BLOCKED', 'DONE']).optional(),
   priority: z.enum(['LOW', 'MED', 'HIGH', 'CRITICAL']).optional(),
+  epic_id: z.string().uuid().nullable().optional(),
 });
 
 const updateTaskSchema = z.object({
@@ -24,6 +25,7 @@ const updateTaskSchema = z.object({
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   status: z.enum(['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'BLOCKED', 'DONE']).optional(),
   priority: z.enum(['LOW', 'MED', 'HIGH', 'CRITICAL']).optional(),
+  epic_id: z.string().uuid().nullable().optional(),
   position_in_backlog: z.number().int().min(0).nullable().optional(),
 });
 

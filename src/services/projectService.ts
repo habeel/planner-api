@@ -10,6 +10,7 @@ import type {
   EpicDependencyType,
   TaskPriority,
 } from '../types/index.js';
+import { generateKey, generateKeyWithClient } from '../utils/keyGenerator.js';
 
 // Input types for service methods
 export interface CreateProjectInput {
@@ -60,11 +61,13 @@ export class ProjectService {
   // ============================================
 
   async create(input: CreateProjectInput): Promise<Project> {
+    const key = await generateKey(this.fastify.db, input.workspace_id, 'project');
+
     const result = await this.fastify.db.query<Project>(
-      `INSERT INTO projects (workspace_id, name, description, goals, created_by)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO projects (workspace_id, name, description, goals, created_by, key)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [input.workspace_id, input.name, input.description, input.goals, input.created_by]
+      [input.workspace_id, input.name, input.description, input.goals, input.created_by, key]
     );
     return result.rows[0]!;
   }
@@ -82,12 +85,15 @@ export class ProjectService {
     try {
       await client.query('BEGIN');
 
+      // Generate project key
+      const projectKey = await generateKeyWithClient(client, projectInput.workspace_id, 'project');
+
       // Create project
       const projectResult = await client.query<Project>(
-        `INSERT INTO projects (workspace_id, name, description, goals, created_by)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO projects (workspace_id, name, description, goals, created_by, key)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [projectInput.workspace_id, projectInput.name, projectInput.description, projectInput.goals, projectInput.created_by]
+        [projectInput.workspace_id, projectInput.name, projectInput.description, projectInput.goals, projectInput.created_by, projectKey]
       );
       const project = projectResult.rows[0]!;
 
@@ -95,11 +101,14 @@ export class ProjectService {
       const createdEpics: Epic[] = [];
       for (let i = 0; i < epics.length; i++) {
         const epic = epics[i]!;
+        // Generate epic key
+        const epicKey = await generateKeyWithClient(client, projectInput.workspace_id, 'epic');
+
         const epicResult = await client.query<Epic>(
-          `INSERT INTO epics (project_id, workspace_id, name, description, priority, estimated_weeks, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO epics (project_id, workspace_id, name, description, priority, estimated_weeks, sort_order, key)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *`,
-          [project.id, projectInput.workspace_id, epic.name, epic.description, 'MED', epic.estimated_weeks, i + 1]
+          [project.id, projectInput.workspace_id, epic.name, epic.description, 'MED', epic.estimated_weeks, i + 1, epicKey]
         );
         createdEpics.push(epicResult.rows[0]!);
       }
@@ -120,6 +129,28 @@ export class ProjectService {
       [id]
     );
     return result.rows[0] || null;
+  }
+
+  async getByKey(workspaceId: string, key: string): Promise<Project | null> {
+    const result = await this.fastify.db.query<Project>(
+      `SELECT * FROM projects WHERE workspace_id = $1 AND UPPER(key) = UPPER($2)`,
+      [workspaceId, key]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Find projects by name within a workspace (case-insensitive).
+   * Returns all matches for disambiguation.
+   */
+  async getProjectsByName(workspaceId: string, name: string): Promise<Project[]> {
+    const result = await this.fastify.db.query<Project>(
+      `SELECT * FROM projects
+       WHERE workspace_id = $1 AND LOWER(name) = LOWER($2)
+       ORDER BY updated_at DESC`,
+      [workspaceId, name]
+    );
+    return result.rows;
   }
 
   async getWithEpics(id: string, workspace_id: string): Promise<ProjectWithEpics | null> {
@@ -208,9 +239,12 @@ export class ProjectService {
     );
     const sortOrder = (sortResult.rows[0]?.max ?? 0) + 1;
 
+    // Generate epic key
+    const key = await generateKey(this.fastify.db, input.workspace_id, 'epic');
+
     const result = await this.fastify.db.query<Epic>(
-      `INSERT INTO epics (project_id, workspace_id, name, description, priority, estimated_weeks, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO epics (project_id, workspace_id, name, description, priority, estimated_weeks, sort_order, key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         input.project_id,
@@ -220,6 +254,7 @@ export class ProjectService {
         input.priority ?? 'MED',
         input.estimated_weeks,
         sortOrder,
+        key,
       ]
     );
     return result.rows[0]!;
@@ -231,6 +266,28 @@ export class ProjectService {
       [id]
     );
     return result.rows[0] || null;
+  }
+
+  async getEpicByKey(workspaceId: string, key: string): Promise<Epic | null> {
+    const result = await this.fastify.db.query<Epic>(
+      `SELECT * FROM epics WHERE workspace_id = $1 AND UPPER(key) = UPPER($2)`,
+      [workspaceId, key]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Find epics by name within a workspace (case-insensitive).
+   * Returns all matches for disambiguation.
+   */
+  async getEpicsByName(workspaceId: string, name: string): Promise<Epic[]> {
+    const result = await this.fastify.db.query<Epic>(
+      `SELECT * FROM epics
+       WHERE workspace_id = $1 AND LOWER(name) = LOWER($2)
+       ORDER BY updated_at DESC`,
+      [workspaceId, name]
+    );
+    return result.rows;
   }
 
   async getEpicWithDependencies(id: string, workspace_id: string): Promise<EpicWithDependencies | null> {
@@ -450,9 +507,12 @@ export class ProjectService {
 
     // Create tasks linked to epic
     for (const story of stories) {
+      // Generate task key
+      const key = await generateKey(this.fastify.db, workspace_id, 'task');
+
       await this.fastify.db.query(
-        `INSERT INTO tasks (workspace_id, epic_id, title, description, estimated_hours, priority, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'BACKLOG')`,
+        `INSERT INTO tasks (workspace_id, epic_id, title, description, estimated_hours, priority, status, key)
+         VALUES ($1, $2, $3, $4, $5, $6, 'BACKLOG', $7)`,
         [
           workspace_id,
           epic_id,
@@ -460,6 +520,7 @@ export class ProjectService {
           story.description,
           story.estimated_hours ?? 0,
           story.priority ?? 'MED',
+          key,
         ]
       );
     }

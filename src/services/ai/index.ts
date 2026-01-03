@@ -4,6 +4,7 @@ import type {
   AIMessage,
   AISettings,
   AIStructuredData,
+  FunctionCallInfo,
 } from '../../types/index.js';
 import { OpenAIProvider } from './providers/openai.js';
 import type { AIProvider, Message, AssistantMessage, ChatResponse } from './providers/base.js';
@@ -20,7 +21,7 @@ import {
   checkUsageLimit,
 } from './usage/tracker.js';
 import { executeFunctionCall } from './functions/executor.js';
-import { buildProjectContext } from './context/projectContext.js';
+import { buildProjectContext, formatProjectContextForPrompt } from './context/projectContext.js';
 import {
   getProjectDetectionInstructions,
   getProjectAwarePromptAddition,
@@ -59,6 +60,7 @@ export interface ChatResult {
     monthlyUsed: number;
     monthlyLimit: number;
   };
+  functionCalls?: FunctionCallInfo[];
 }
 
 export class AIService {
@@ -377,17 +379,48 @@ export class AIService {
     let totalInputTokens = response.usage.inputTokens;
     let totalOutputTokens = response.usage.outputTokens;
 
+    // Track executed function calls for developer visibility
+    const executedFunctionCalls: FunctionCallInfo[] = [];
+
     // Function call loop - process tool calls until AI provides a final response
     let functionCallRound = 0;
     while (response.toolCalls && response.toolCalls.length > 0 && functionCallRound < MAX_FUNCTION_CALL_ROUNDS) {
       functionCallRound++;
 
-      // Execute all function calls in parallel
-      const toolResults = await Promise.all(
-        response.toolCalls.map((tc) =>
-          executeFunctionCall(this.fastify.db, workspaceId, tc, userId, this.fastify)
-        )
+      // Execute all function calls in parallel and track results
+      const toolCallsWithResults = await Promise.all(
+        response.toolCalls.map(async (tc) => {
+          const result = await executeFunctionCall(this.fastify.db, workspaceId, tc, userId, this.fastify);
+
+          // Parse result to extract success/summary for tracking
+          let success = true;
+          let summary = 'Executed successfully';
+          try {
+            const parsed = JSON.parse(result.content) as { success?: boolean; error?: string; data?: unknown };
+            success = parsed.success !== false;
+            if (parsed.error) {
+              summary = `Error: ${parsed.error}`;
+            } else if (parsed.data && typeof parsed.data === 'object') {
+              const dataKeys = Object.keys(parsed.data);
+              summary = dataKeys.length > 0 ? `Returned: ${dataKeys.join(', ')}` : 'Completed';
+            }
+          } catch {
+            // If parsing fails, use default summary
+          }
+
+          // Track the function call
+          executedFunctionCalls.push({
+            name: tc.name,
+            arguments: tc.arguments,
+            result: { success, summary },
+            executedAt: new Date().toISOString(),
+          });
+
+          return result;
+        })
       );
+
+      const toolResults = toolCallsWithResults;
 
       // Build the assistant message with tool calls to send back
       const assistantMessageWithTools: AssistantMessage = {
@@ -398,6 +431,36 @@ export class AIService {
 
       // Add assistant message and tool results to the conversation
       aiMessages.push(assistantMessageWithTools, ...toolResults);
+
+      // Check if any project was created and inject fresh context with UUIDs
+      // This ensures the AI has access to real UUIDs for subsequent function calls
+      for (const toolResult of toolResults) {
+        try {
+          const result = JSON.parse(toolResult.content) as {
+            success?: boolean;
+            data?: { projectId?: string };
+          };
+          if (result.success && result.data?.projectId) {
+            const projectContext = await buildProjectContext(
+              this.fastify.db,
+              result.data.projectId
+            );
+            if (projectContext) {
+              const contextMessage: Message = {
+                role: 'system',
+                content: `## Newly Created Project Context
+
+${formatProjectContextForPrompt(projectContext)}
+
+IMPORTANT: The project and epics above have been created. When calling functions like create_stories_for_epic or get_project_context, you MUST use the UUIDs shown in [id: ...] format above. Do NOT use epic names as IDs.`,
+              };
+              aiMessages.push(contextMessage);
+            }
+          }
+        } catch {
+          // Ignore parse errors - not all tool results are project creations
+        }
+      }
 
       // Call AI again with the function results
       response = await this.provider.chat({
@@ -455,6 +518,7 @@ export class AIService {
           Number(updatedUsage.output_tokens_used),
         monthlyLimit: usageCheck.limit,
       },
+      functionCalls: executedFunctionCalls.length > 0 ? executedFunctionCalls : undefined,
     };
   }
 

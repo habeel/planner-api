@@ -10,6 +10,7 @@ import type { Pool } from 'pg';
 export interface ProjectContext {
   project: {
     id: string;
+    key: string;
     name: string;
     description: string | null;
     goals: string | null;
@@ -17,13 +18,14 @@ export interface ProjectContext {
   };
   epics: Array<{
     id: string;
+    key: string;
     name: string;
     description: string | null;
     status: string;
     storyCount: number;
     estimatedWeeks: number | null;
-    dependsOn: string[]; // Names of epics this depends on
-    blockedBy: string[]; // Names of epics blocking this
+    dependsOn: string[]; // Keys of epics this depends on (e.g., "E-1")
+    blockedBy: string[]; // Keys of epics blocking this (e.g., "E-2")
   }>;
   conversationHistory: Array<{
     summary: string;
@@ -42,6 +44,7 @@ export async function buildProjectContext(
             json_agg(
               json_build_object(
                 'id', e.id,
+                'key', e.key,
                 'name', e.name,
                 'description', e.description,
                 'status', e.status,
@@ -82,13 +85,13 @@ export async function buildProjectContext(
     );
   }
 
-  // Get dependencies
+  // Get dependencies - using keys instead of names for AI PM
   let dependencies = new Map<string, string[]>();
   let blockedBy = new Map<string, string[]>();
 
   if (epicIds.length > 0) {
     const depsResult = await db.query(
-      `SELECT ed.epic_id, ed.depends_on_epic_id, e1.name as epic_name, e2.name as depends_on_name
+      `SELECT ed.epic_id, ed.depends_on_epic_id, e1.key as epic_key, e2.key as depends_on_key
        FROM epic_dependencies ed
        JOIN epics e1 ON e1.id = ed.epic_id
        JOIN epics e2 ON e2.id = ed.depends_on_epic_id
@@ -97,15 +100,15 @@ export async function buildProjectContext(
     );
 
     for (const dep of depsResult.rows) {
-      if (!dependencies.has(dep.epic_name)) {
-        dependencies.set(dep.epic_name, []);
+      if (!dependencies.has(dep.epic_key)) {
+        dependencies.set(dep.epic_key, []);
       }
-      dependencies.get(dep.epic_name)!.push(dep.depends_on_name);
+      dependencies.get(dep.epic_key)!.push(dep.depends_on_key);
 
-      if (!blockedBy.has(dep.depends_on_name)) {
-        blockedBy.set(dep.depends_on_name, []);
+      if (!blockedBy.has(dep.depends_on_key)) {
+        blockedBy.set(dep.depends_on_key, []);
       }
-      blockedBy.get(dep.depends_on_name)!.push(dep.epic_name);
+      blockedBy.get(dep.depends_on_key)!.push(dep.epic_key);
     }
   }
 
@@ -125,6 +128,7 @@ export async function buildProjectContext(
   return {
     project: {
       id: row.id,
+      key: row.key,
       name: row.name,
       description: row.description,
       goals: row.goals,
@@ -132,19 +136,21 @@ export async function buildProjectContext(
     },
     epics: epics.map((e: {
       id: string;
+      key: string;
       name: string;
       description: string | null;
       status: string;
       estimated_weeks: number | null;
     }) => ({
       id: e.id,
+      key: e.key,
       name: e.name,
       description: e.description,
       status: e.status,
       storyCount: storyCounts.get(e.id) || 0,
       estimatedWeeks: e.estimated_weeks,
-      dependsOn: dependencies.get(e.name) || [],
-      blockedBy: blockedBy.get(e.name) || [],
+      dependsOn: dependencies.get(e.key) || [],
+      blockedBy: blockedBy.get(e.key) || [],
     })),
     conversationHistory: conversationsResult.rows.map((r: { title: string; created_at: Date }) => ({
       summary: r.title || 'Untitled conversation',
@@ -204,7 +210,7 @@ async function extractCrossEpicPatterns(
 }
 
 export function formatProjectContextForPrompt(context: ProjectContext): string {
-  let prompt = `## Project: ${context.project.name}\n`;
+  let prompt = `## Project: ${context.project.name} (${context.project.key})\n`;
 
   if (context.project.description) {
     prompt += `Description: ${context.project.description}\n`;
@@ -218,6 +224,7 @@ export function formatProjectContextForPrompt(context: ProjectContext): string {
 
   if (context.epics.length > 0) {
     prompt += `## Epics (${context.epics.length} total)\n`;
+    prompt += `Use epic keys (E-1, E-2, etc.) when calling functions.\n`;
 
     const statusEmojis: Record<string, string> = {
       draft: '📝',
@@ -231,7 +238,8 @@ export function formatProjectContextForPrompt(context: ProjectContext): string {
     for (const epic of context.epics) {
       const statusEmoji = statusEmojis[epic.status] || '•';
 
-      prompt += `\n${statusEmoji} **${epic.name}** [id: ${epic.id}] (${epic.status})`;
+      // Use key instead of UUID for easy AI reference
+      prompt += `\n${statusEmoji} **${epic.name}** (${epic.key}) - ${epic.status}`;
 
       if (epic.storyCount > 0) {
         prompt += ` - ${epic.storyCount} stories`;

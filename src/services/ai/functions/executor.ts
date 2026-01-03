@@ -15,6 +15,12 @@ import {
 import { ProjectService } from '../../projectService.js';
 import type { FastifyInstance } from 'fastify';
 import type { EpicDependencyType, TaskPriority } from '../../../types/index.js';
+import {
+  resolveKeyToId,
+  isValidKey,
+  getExpectedKeyFormat,
+  type ResolutionResult,
+} from '../../../utils/entityResolver.js';
 
 export interface FunctionResult {
   success: boolean;
@@ -27,6 +33,44 @@ export interface ExecuteFunctionContext {
   workspaceId: string;
   userId: string;
   fastify?: FastifyInstance;
+}
+
+/**
+ * Resolve a project key (P-1, P-2, etc.) to its UUID.
+ * ONLY accepts keys - no UUIDs or names.
+ */
+async function resolveProjectKey(
+  db: Pool,
+  workspaceId: string,
+  key: string
+): Promise<ResolutionResult> {
+  if (!isValidKey(key, 'project')) {
+    return {
+      success: false,
+      error: `Invalid project key format "${key}". Expected format: ${getExpectedKeyFormat('project')}. Use keys like P-1, P-2, etc.`,
+    };
+  }
+
+  return resolveKeyToId(db, workspaceId, key, 'project');
+}
+
+/**
+ * Resolve an epic key (E-1, E-2, etc.) to its UUID.
+ * ONLY accepts keys - no UUIDs or names.
+ */
+async function resolveEpicKey(
+  db: Pool,
+  workspaceId: string,
+  key: string
+): Promise<ResolutionResult> {
+  if (!isValidKey(key, 'epic')) {
+    return {
+      success: false,
+      error: `Invalid epic key format "${key}". Expected format: ${getExpectedKeyFormat('epic')}. Use keys like E-1, E-2, etc.`,
+    };
+  }
+
+  return resolveKeyToId(db, workspaceId, key, 'epic');
 }
 
 /**
@@ -83,7 +127,7 @@ async function executeFunction(
 
       // Project & Epic functions
       case 'get_project_context':
-        return await handleGetProjectContext(db, args);
+        return await handleGetProjectContext(ctx, args);
 
       case 'create_project_with_epics':
         return await handleCreateProjectWithEpics(ctx, args);
@@ -490,19 +534,30 @@ function getCurrentWeekStart(): string {
  * Get full project context for AI conversations.
  */
 async function handleGetProjectContext(
-  db: Pool,
+  ctx: ExecuteFunctionContext,
   args: Record<string, unknown>
 ): Promise<FunctionResult> {
-  const projectId = args.projectId as string;
+  const { db, workspaceId } = ctx;
+  const projectKey = args.projectId as string;
 
-  if (!projectId) {
+  if (!projectKey) {
     return {
       success: false,
-      error: 'projectId is required',
+      error: 'projectId is required. Use the project key (e.g., P-1, P-2)',
     };
   }
 
-  const context = await buildProjectContext(db, projectId);
+  // Resolve project key to UUID (keys only - no UUIDs or names)
+  const resolution = await resolveProjectKey(db, workspaceId, projectKey);
+  if (!resolution.success) {
+    console.error('get_project_context: failed to resolve projectId:', projectKey);
+    return {
+      success: false,
+      error: resolution.error!,
+    };
+  }
+
+  const context = await buildProjectContext(db, resolution.id!);
 
   if (!context) {
     return {
@@ -581,14 +636,29 @@ async function handleCreateProjectWithEpics(
     }))
   );
 
+  // Build key mapping for AI to reference (keys are the primary identifiers now)
+  const epicKeyMapping = Object.fromEntries(
+    createdEpics.map((e) => [e.name, e.key])
+  );
+
+  // Format epic keys for the message
+  const epicKeyList = createdEpics
+    .map((e) => `"${e.name}" = ${e.key}`)
+    .join(', ');
+
   return {
     success: true,
     data: {
-      projectId: project.id,
+      projectKey: project.key,
       projectName: project.name,
       epicCount: createdEpics.length,
-      epics: createdEpics.map((e) => ({ id: e.id, name: e.name })),
-      message: `Created project "${project.name}" with ${createdEpics.length} epics`,
+      epics: createdEpics.map((e) => ({ key: e.key, name: e.name })),
+      // Explicit mapping from epic names to keys
+      keyMapping: {
+        project: { [project.name]: project.key },
+        epics: epicKeyMapping,
+      },
+      message: `Created project "${project.name}" (${project.key}) with ${createdEpics.length} epics. Use these keys for function calls: ${epicKeyList}`,
     },
   };
 }
@@ -600,7 +670,7 @@ async function handleCreateStoriesForEpic(
   ctx: ExecuteFunctionContext,
   args: Record<string, unknown>
 ): Promise<FunctionResult> {
-  const { fastify, workspaceId: ctxWorkspaceId } = ctx;
+  const { db, fastify, workspaceId } = ctx;
 
   if (!fastify) {
     return {
@@ -609,9 +679,7 @@ async function handleCreateStoriesForEpic(
     };
   }
 
-  const epicId = args.epicId as string;
-  // Always use context's workspaceId - the AI may pass workspace name instead of UUID
-  const workspaceId = ctxWorkspaceId;
+  const epicKey = args.epicId as string;
   const stories = args.stories as Array<{
     title: string;
     description?: string;
@@ -619,23 +687,24 @@ async function handleCreateStoriesForEpic(
     priority?: TaskPriority;
   }>;
 
-  if (!epicId || !workspaceId || !stories || !Array.isArray(stories)) {
-    console.error('create_stories_for_epic validation failed:', { epicId, workspaceId, stories: !!stories, isArray: Array.isArray(stories) });
+  if (!epicKey || !stories || !Array.isArray(stories)) {
+    console.error('create_stories_for_epic validation failed:', { epicKey, stories: !!stories, isArray: Array.isArray(stories) });
     return {
       success: false,
-      error: 'epicId, workspaceId, and stories are required',
+      error: 'epicId (e.g., E-1) and stories are required',
     };
   }
 
-  // Validate epicId is a valid UUID format
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(epicId)) {
-    console.error('create_stories_for_epic: epicId is not a valid UUID:', epicId);
+  // Resolve epic key to UUID (keys only - no UUIDs or names)
+  const resolution = await resolveEpicKey(db, workspaceId, epicKey);
+  if (!resolution.success) {
+    console.error('create_stories_for_epic: failed to resolve epicId:', epicKey);
     return {
       success: false,
-      error: `Invalid epicId format. Expected UUID (like "550e8400-e29b-41d4-a716-446655440000"), got: "${epicId}". Use the [id: ...] value shown in the epic list.`,
+      error: resolution.error!,
     };
   }
+  const epicId = resolution.id!;
 
   const projectService = new ProjectService(fastify);
 
@@ -645,7 +714,7 @@ async function handleCreateStoriesForEpic(
     success: true,
     data: {
       storyCount: stories.length,
-      message: `Created ${stories.length} stories for the epic`,
+      message: `Created ${stories.length} stories for epic ${epicKey}`,
     },
   };
 }
@@ -657,7 +726,7 @@ async function handleAddEpicDependency(
   ctx: ExecuteFunctionContext,
   args: Record<string, unknown>
 ): Promise<FunctionResult> {
-  const { fastify } = ctx;
+  const { db, fastify, workspaceId } = ctx;
 
   if (!fastify) {
     return {
@@ -666,31 +735,36 @@ async function handleAddEpicDependency(
     };
   }
 
-  const epicId = args.epicId as string;
-  const dependsOnEpicId = args.dependsOnEpicId as string;
+  const epicKey = args.epicId as string;
+  const dependsOnEpicKey = args.dependsOnEpicId as string;
   const type = (args.type as EpicDependencyType) || 'blocks';
 
-  if (!epicId || !dependsOnEpicId) {
+  if (!epicKey || !dependsOnEpicKey) {
     return {
       success: false,
-      error: 'epicId and dependsOnEpicId are required',
+      error: 'epicId (e.g., E-1) and dependsOnEpicId (e.g., E-2) are required',
     };
   }
 
-  // Validate both IDs are valid UUIDs
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(epicId)) {
+  // Resolve both epic keys to UUIDs (keys only - no UUIDs or names)
+  const epicResolution = await resolveEpicKey(db, workspaceId, epicKey);
+  if (!epicResolution.success) {
     return {
       success: false,
-      error: `Invalid epicId format. Expected UUID, got: "${epicId}". Use the [id: ...] value shown in the epic list.`,
+      error: `Failed to resolve epicId: ${epicResolution.error}`,
     };
   }
-  if (!uuidRegex.test(dependsOnEpicId)) {
+
+  const dependsOnResolution = await resolveEpicKey(db, workspaceId, dependsOnEpicKey);
+  if (!dependsOnResolution.success) {
     return {
       success: false,
-      error: `Invalid dependsOnEpicId format. Expected UUID, got: "${dependsOnEpicId}". Use the [id: ...] value shown in the epic list.`,
+      error: `Failed to resolve dependsOnEpicId: ${dependsOnResolution.error}`,
     };
   }
+
+  const epicId = epicResolution.id!;
+  const dependsOnEpicId = dependsOnResolution.id!;
 
   const projectService = new ProjectService(fastify);
 
@@ -699,7 +773,7 @@ async function handleAddEpicDependency(
     return {
       success: true,
       data: {
-        message: 'Dependency added successfully',
+        message: `Dependency added: ${epicKey} depends on ${dependsOnEpicKey}`,
       },
     };
   } catch (error) {

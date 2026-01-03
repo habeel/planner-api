@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Task, TaskStatus, TaskPriority, TaskSource, TaskDependency, DependencyType } from '../types/index.js';
+import { generateKey } from '../utils/keyGenerator.js';
 
 export interface CreateTaskInput {
   workspace_id: string;
@@ -15,6 +16,7 @@ export interface CreateTaskInput {
   jira_key?: string;
   github_issue_number?: number;
   project?: string;
+  epic_id?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -28,6 +30,7 @@ export interface UpdateTaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   project?: string | null;
+  epic_id?: string | null;
   position_in_backlog?: number | null;
 }
 
@@ -44,12 +47,15 @@ export class TaskService {
   constructor(private fastify: FastifyInstance) {}
 
   async create(input: CreateTaskInput): Promise<Task> {
+    // Generate task key
+    const key = await generateKey(this.fastify.db, input.workspace_id, 'task');
+
     const result = await this.fastify.db.query<Task>(
       `INSERT INTO tasks (
         workspace_id, title, description, estimated_hours,
         assigned_to_user_id, start_date, due_date, status, priority,
-        source, jira_key, github_issue_number, project, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        source, jira_key, github_issue_number, project, epic_id, metadata, key
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         input.workspace_id,
@@ -65,7 +71,9 @@ export class TaskService {
         input.jira_key || null,
         input.github_issue_number || null,
         input.project || null,
+        input.epic_id || null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        key,
       ]
     );
     return result.rows[0]!;
@@ -73,8 +81,30 @@ export class TaskService {
 
   async getById(id: string): Promise<Task | null> {
     const result = await this.fastify.db.query<Task>(
-      `SELECT * FROM tasks WHERE id = $1`,
+      `SELECT t.*,
+              e.name as epic_name,
+              p.id as project_id,
+              p.name as project_name
+       FROM tasks t
+       LEFT JOIN epics e ON t.epic_id = e.id
+       LEFT JOIN projects p ON e.project_id = p.id
+       WHERE t.id = $1`,
       [id]
+    );
+    return result.rows[0] || null;
+  }
+
+  async getByKey(workspaceId: string, key: string): Promise<Task | null> {
+    const result = await this.fastify.db.query<Task>(
+      `SELECT t.*,
+              e.name as epic_name,
+              p.id as project_id,
+              p.name as project_name
+       FROM tasks t
+       LEFT JOIN epics e ON t.epic_id = e.id
+       LEFT JOIN projects p ON e.project_id = p.id
+       WHERE t.workspace_id = $1 AND UPPER(t.key) = UPPER($2)`,
+      [workspaceId, key]
     );
     return result.rows[0] || null;
   }
@@ -141,6 +171,10 @@ export class TaskService {
       updates.push(`project = $${paramIndex++}`);
       values.push(input.project);
     }
+    if (input.epic_id !== undefined) {
+      updates.push(`epic_id = $${paramIndex++}`);
+      values.push(input.epic_id);
+    }
     if (input.position_in_backlog !== undefined) {
       updates.push(`position_in_backlog = $${paramIndex++}`);
       values.push(input.position_in_backlog);
@@ -195,9 +229,15 @@ export class TaskService {
     }
 
     const result = await this.fastify.db.query<Task>(
-      `SELECT * FROM tasks
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY COALESCE(start_date, '9999-12-31'), priority DESC, created_at`,
+      `SELECT t.*,
+              e.name as epic_name,
+              p.id as project_id,
+              p.name as project_name
+       FROM tasks t
+       LEFT JOIN epics e ON t.epic_id = e.id
+       LEFT JOIN projects p ON e.project_id = p.id
+       WHERE ${conditions.join(' AND ').replace(/workspace_id/g, 't.workspace_id').replace(/assigned_to_user_id/g, 't.assigned_to_user_id').replace(/status/g, 't.status').replace(/start_date/g, 't.start_date')}
+       ORDER BY COALESCE(t.start_date, '9999-12-31'), t.priority DESC, t.created_at`,
       values
     );
 
@@ -210,10 +250,16 @@ export class TaskService {
     const weekEndStr = weekEnd.toISOString().split('T')[0];
 
     const result = await this.fastify.db.query<Task>(
-      `SELECT * FROM tasks
-       WHERE workspace_id = $1
-       AND (start_date BETWEEN $2 AND $3 OR start_date IS NULL)
-       ORDER BY COALESCE(start_date, '9999-12-31'), priority DESC`,
+      `SELECT t.*,
+              e.name as epic_name,
+              p.id as project_id,
+              p.name as project_name
+       FROM tasks t
+       LEFT JOIN epics e ON t.epic_id = e.id
+       LEFT JOIN projects p ON e.project_id = p.id
+       WHERE t.workspace_id = $1
+       AND (t.start_date BETWEEN $2 AND $3 OR t.start_date IS NULL)
+       ORDER BY COALESCE(t.start_date, '9999-12-31'), t.priority DESC`,
       [workspaceId, weekStart, weekEndStr]
     );
 

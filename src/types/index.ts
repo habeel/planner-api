@@ -90,6 +90,7 @@ export type TaskSource = 'manual' | 'jira' | 'github';
 
 export interface Task {
   id: string;
+  key: string;
   workspace_id: string;
   title: string;
   description: string | null;
@@ -103,6 +104,10 @@ export interface Task {
   jira_key: string | null;
   github_issue_number: number | null;
   project: string | null;
+  epic_id: string | null;
+  epic_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
   metadata: Record<string, unknown> | null;
   created_at: Date;
   updated_at: Date;
@@ -395,6 +400,17 @@ export interface AISettings {
   updated_at: Date;
 }
 
+// AI Function Call Info for developer visibility
+export interface FunctionCallInfo {
+  name: string;
+  arguments: Record<string, unknown>;
+  result: {
+    success: boolean;
+    summary: string;
+  };
+  executedAt: string;
+}
+
 // AI Structured Data types for rich responses
 export type AIStructuredData =
   | TaskSuggestionsData
@@ -530,6 +546,7 @@ export type EpicDependencyType = 'blocks' | 'related' | 'informs';
 
 export interface Project {
   id: string;
+  key: string;
   workspace_id: string;
   name: string;
   description: string | null;
@@ -542,6 +559,7 @@ export interface Project {
 
 export interface Epic {
   id: string;
+  key: string;
   project_id: string;
   workspace_id: string;
   name: string;

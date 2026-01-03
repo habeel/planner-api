@@ -103,7 +103,8 @@ export const aiFunctions: FunctionDefinition[] = [
       properties: {
         projectId: {
           type: 'string',
-          description: 'The project ID to get context for',
+          description: 'The project key (P-1, P-2, etc.) - REQUIRED format',
+          pattern: '^P-\\d+$',
         },
       },
       required: ['projectId'],
@@ -158,11 +159,8 @@ export const aiFunctions: FunctionDefinition[] = [
       properties: {
         epicId: {
           type: 'string',
-          description: 'The UUID of the epic (from the [id: ...] shown in epic list)',
-        },
-        workspaceId: {
-          type: 'string',
-          description: 'The workspace ID',
+          description: 'The epic key (E-1, E-2, etc.) - REQUIRED format',
+          pattern: '^E-\\d+$',
         },
         stories: {
           type: 'array',
@@ -179,7 +177,7 @@ export const aiFunctions: FunctionDefinition[] = [
           description: 'Stories to create',
         },
       },
-      required: ['epicId', 'workspaceId', 'stories'],
+      required: ['epicId', 'stories'],
     },
   },
   {
@@ -191,11 +189,13 @@ export const aiFunctions: FunctionDefinition[] = [
       properties: {
         epicId: {
           type: 'string',
-          description: 'UUID of the epic that has the dependency (from [id: ...] in epic list)',
+          description: 'The epic key (E-1, E-2, etc.) that has the dependency - REQUIRED format',
+          pattern: '^E-\\d+$',
         },
         dependsOnEpicId: {
           type: 'string',
-          description: 'UUID of the epic that must be completed first (from [id: ...] in epic list)',
+          description: 'The epic key (E-1, E-2, etc.) that must be completed first - REQUIRED format',
+          pattern: '^E-\\d+$',
         },
         type: {
           type: 'string',

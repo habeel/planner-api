@@ -165,6 +165,7 @@ export default async function aiRoutes(fastify: FastifyInstance) {
           conversationId: result.conversation.id,
           message: result.assistantMessage,
           usage: result.usage,
+          functionCalls: result.functionCalls,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';

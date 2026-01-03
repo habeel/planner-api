@@ -10,6 +10,7 @@ export interface UserTimeData {
 
 export interface TaskTimeData {
   task_id: string;
+  key: string;
   title: string;
   estimated_hours: number;
   logged_hours: number;
@@ -87,6 +88,7 @@ export class ReportService {
     // Get hours by task
     const taskHoursResult = await this.fastify.db.query<{
       task_id: string;
+      key: string;
       title: string;
       estimated_hours: number;
       status: string;
@@ -94,6 +96,7 @@ export class ReportService {
     }>(
       `SELECT
         t.id as task_id,
+        t.key,
         t.title,
         t.estimated_hours,
         t.status,
@@ -101,7 +104,7 @@ export class ReportService {
       FROM tasks t
       LEFT JOIN time_entries te ON te.task_id = t.id AND te.date BETWEEN $2 AND $3
       WHERE t.workspace_id = $1
-      GROUP BY t.id, t.title, t.estimated_hours, t.status
+      GROUP BY t.id, t.key, t.title, t.estimated_hours, t.status
       HAVING COALESCE(SUM(te.hours), 0) > 0
       ORDER BY total_hours DESC`,
       [workspaceId, from, to]
@@ -111,6 +114,7 @@ export class ReportService {
       const loggedHours = parseFloat(row.total_hours);
       return {
         task_id: row.task_id,
+        key: row.key,
         title: row.title,
         estimated_hours: row.estimated_hours,
         logged_hours: loggedHours,
